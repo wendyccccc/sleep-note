@@ -276,6 +276,15 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
       <p class="muted" style="font-size:12px;margin:10px 0 0">「其他」和「沒有」會固定顯示。刪除類型不會影響已存的紀錄。</p>
     </div>
     <div class="card">
+      <h2>其他因素</h2>
+      <div id="s-fx-list"></div>
+      <div class="add-row">
+        <input type="text" id="s-fx-new" placeholder="例如：吃宵夜、加班、看恐怖片" maxlength="12">
+        <button type="button" class="btn primary" id="s-fx-add">新增</button>
+      </div>
+      <p class="muted" style="font-size:12px;margin:10px 0 0">紀錄時可以複選，分析頁會逐一比較每個因素。刪除不會影響已存的紀錄。</p>
+    </div>
+    <div class="card">
       <h2>資料備份</h2>
       <button class="btn ghost" id="btn-export">匯出 JSON 備份</button>
       <button class="btn ghost" id="btn-csv">匯出 CSV（可用 Excel 開）</button>
@@ -407,15 +416,8 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
         </div>
       </div>
       <div class="field">
-        <span class="label">其他因素<span class="hint">選填，越多越容易找到原因</span></span>
-        <div class="chips" data-multi="extra">
-          <button type="button" class="chip" data-v="nap">有午睡</button>
-          <button type="button" class="chip" data-v="alcohol">喝酒</button>
-          <button type="button" class="chip" data-v="screen">睡前滑手機</button>
-          <button type="button" class="chip" data-v="stress">壓力大</button>
-          <button type="button" class="chip" data-v="lateMeal">太晚吃東西</button>
-          <button type="button" class="chip" data-v="meds">有吃助眠藥</button>
-        </div>
+        <span class="label">其他因素<span class="hint">選填，可到「設定」自訂</span></span>
+        <div class="chips" data-multi="extra" id="extra-chips"></div>
       </div>
     </div>
 
@@ -448,14 +450,26 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
   /* ---------- 常數 ---------- */
   const KEY = 'sleepnote.v1';
   const FEEL = {hardFall:'難以入睡',light:'淺眠',wake:'半夜醒來',early:'太早醒',dream:'多夢',groggy:'起床昏沉'};
-  const EXTRA = {nap:'有午睡',alcohol:'喝酒',screen:'睡前滑手機',stress:'壓力大',lateMeal:'太晚吃東西',meds:'有吃助眠藥'};
   const SKEY = 'sleepnote.settings.v1';
   const DEFAULT_EX = [
     {id:'strongWeight', label:'重訓（強）'},
     {id:'lightWeight',  label:'重訓（弱）'},
     {id:'cardio',       label:'有氧'}
   ];
-  const DEFAULT_SETTINGS = {gender:'other', bed:'23:30', wake:'07:30', exTypes:DEFAULT_EX};
+  const DEFAULT_FX = [
+    {id:'nap',      label:'有午睡'},
+    {id:'alcohol',  label:'喝酒'},
+    {id:'screen',   label:'睡前滑手機'},
+    {id:'stress',   label:'壓力大'},
+    {id:'lateMeal', label:'太晚吃東西'},
+    {id:'meds',     label:'有吃助眠藥'}
+  ];
+  const DEFAULT_SETTINGS = {gender:'other', bed:'23:30', wake:'07:30', exTypes:DEFAULT_EX, fxTypes:DEFAULT_FX};
+  // 其他因素名稱：目前設定 → 紀錄裡存下的名稱 → 內建名稱
+  const fxLabel = (id, r) => {
+    const t = settings.fxTypes.find(t => t.id === id) || DEFAULT_FX.find(t => t.id === id);
+    return t ? t.label : (r?.fxNames?.[id] || '其他');
+  };
   // 運動名稱：先看目前設定，再看紀錄當時存下的名稱，最後才用內建名稱
   const exLabel = r => {
     if (!r.exercise || r.exercise === 'none') return '沒運動';
@@ -529,6 +543,7 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
     if (canStore){ try { s = JSON.parse(localStorage.getItem(SKEY)) || {}; } catch {} }
     s = {...DEFAULT_SETTINGS, ...s};
     if (!Array.isArray(s.exTypes)) s.exTypes = DEFAULT_EX;
+    if (!Array.isArray(s.fxTypes)) s.fxTypes = DEFAULT_FX;
     return s;
   }
   function saveSettings(){
@@ -540,13 +555,52 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
     $$('#s-gender button').forEach(b => b.classList.toggle('on', b.dataset.v === settings.gender));
     $('#s-bed').value = settings.bed;
     $('#s-wake').value = settings.wake;
-    $('#s-ex-list').innerHTML = settings.exTypes.length
-      ? settings.exTypes.map(t => `<div class="ex-item"><span>${esc(t.label)}</span>
-          <button type="button" class="icon-btn" data-del-ex="${t.id}" aria-label="刪除 ${esc(t.label)}">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 7h14M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>
-          </button></div>`).join('')
-      : '<p class="muted" style="margin:0">尚未設定，紀錄時只會有「其他」和「沒有」</p>';
+    LISTS.forEach(renderList);
   }
+
+  /* 可自訂清單（運動類型、其他因素）共用的新增／刪除邏輯 */
+  const TRASH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 7h14M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>';
+  const LISTS = [
+    {
+      key:'exTypes', el:'ex', max:10, reserved:['其他','沒有'],
+      empty:'尚未設定，紀錄時只會有「其他」和「沒有」',
+      // 刪除前把名稱寫進用到它的紀錄
+      keepName:(r, t) => { if (r.exercise === t.id) r.exName = t.label; }
+    },
+    {
+      key:'fxTypes', el:'fx', max:20, reserved:[],
+      empty:'尚未設定，紀錄表單不會顯示其他因素',
+      keepName:(r, t) => { if ((r.extra||[]).includes(t.id)) r.fxNames = {...(r.fxNames||{}), [t.id]:t.label}; }
+    }
+  ];
+  function renderList(L){
+    const items = settings[L.key];
+    $(`#s-${L.el}-list`).innerHTML = items.length
+      ? items.map(t => `<div class="ex-item"><span>${esc(t.label)}</span>
+          <button type="button" class="icon-btn" data-del="${t.id}" aria-label="刪除 ${esc(t.label)}">${TRASH}</button></div>`).join('')
+      : `<p class="muted" style="margin:0">${L.empty}</p>`;
+  }
+  LISTS.forEach(L => {
+    const inp = $(`#s-${L.el}-new`);
+    $(`#s-${L.el}-add`).addEventListener('click', () => {
+      const label = inp.value.trim();
+      if (!label) return toast('請輸入名稱');
+      if (L.reserved.includes(label) || settings[L.key].some(t => t.label === label)) return toast('已經有這個項目了');
+      if (settings[L.key].length >= L.max) return toast(`最多 ${L.max} 個`);
+      settings[L.key] = [...settings[L.key], {id:'c' + Date.now().toString(36), label}];
+      inp.value = ''; saveSettings(); renderList(L); toast('已新增');
+    });
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); $(`#s-${L.el}-add`).click(); } });
+    $(`#s-${L.el}-list`).addEventListener('click', async e => {
+      const b = e.target.closest('[data-del]'); if (!b) return;
+      const t = settings[L.key].find(t => t.id === b.dataset.del);
+      if (!t || !(await ask(`刪除「${t.label}」？已存的紀錄會保留這個名稱。`, '刪除', true))) return;
+      Object.values(data).forEach(r => L.keepName(r, t));
+      save();
+      settings[L.key] = settings[L.key].filter(x => x.id !== t.id);
+      saveSettings(); renderList(L); toast('已刪除');
+    });
+  });
 
   $('#s-gender').addEventListener('click', e => {
     const b = e.target.closest('button'); if (!b) return;
@@ -556,26 +610,6 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
     if (!e.target.value) return;
     settings[k] = e.target.value; saveSettings(); toast('已更新');
   }));
-  $('#s-ex-add').addEventListener('click', () => {
-    const inp = $('#s-ex-new');
-    const label = inp.value.trim();
-    if (!label) return toast('請輸入運動名稱');
-    if (['其他','沒有'].includes(label) || settings.exTypes.some(t => t.label === label)) return toast('已經有這個類型了');
-    if (settings.exTypes.length >= 10) return toast('最多 10 種');
-    settings.exTypes = [...settings.exTypes, {id:'c' + Date.now().toString(36), label}];
-    inp.value = ''; saveSettings(); renderSettings(); toast('已新增');
-  });
-  $('#s-ex-new').addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); $('#s-ex-add').click(); } });
-  $('#s-ex-list').addEventListener('click', async e => {
-    const b = e.target.closest('[data-del-ex]'); if (!b) return;
-    const t = settings.exTypes.find(t => t.id === b.dataset.delEx);
-    if (!t || !(await ask(`刪除「${t.label}」？已存的紀錄會保留這個名稱。`, '刪除', true))) return;
-    // 把名稱寫進用到它的舊紀錄，刪掉之後列表上仍顯示得出來
-    Object.values(data).forEach(r => { if (r.exercise === t.id) r.exName = t.label; });
-    save();
-    settings.exTypes = settings.exTypes.filter(x => x.id !== t.id);
-    saveSettings(); renderSettings(); toast('已刪除');
-  });
 
   // 紀錄表單裡的運動按鈕依設定產生
   function buildExerciseButtons(current){
@@ -590,6 +624,15 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
       items.map(t => `<button type="button" data-v="${t.id}">${esc(t.label)}</button>`).join('') +
       `<button type="button" data-v="other">其他</button>` +
       `<button type="button" data-v="none" style="grid-column:span ${span}">沒有</button>`;
+  }
+  // 紀錄表單裡的「其他因素」依設定產生
+  function buildFactorChips(r){
+    const items = [...settings.fxTypes];
+    // 修改舊紀錄時，已被刪除的因素也補回來，才不會存檔時被清掉
+    (r?.extra || []).forEach(id => { if (!items.some(t => t.id === id)) items.push({id, label:fxLabel(id, r)}); });
+    $('#extra-chips').innerHTML = items.length
+      ? items.map(t => `<button type="button" class="chip" data-v="${t.id}">${esc(t.label)}</button>`).join('')
+      : '<span class="muted" style="font-size:14px">尚未設定，可到「設定」新增</span>';
   }
   const sorted = () => Object.values(data).sort((a,b) => b.date.localeCompare(a.date));
 
@@ -681,7 +724,7 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
       if (r.caffeine) bits.push(`咖啡因 ${r.caffeine} 杯`);
       if (r.exercise && r.exercise!=='none') bits.push(exLabel(r));
       if (r.period==='yes') bits.push('經期');
-      (r.extra||[]).forEach(k=>bits.push(EXTRA[k]));
+      (r.extra||[]).forEach(k=>bits.push(fxLabel(k, r)));
       return `<button class="entry" data-act="edit" data-date="${r.date}">
         <div class="d"><b>${d.getDate()}</b><small>${d.getMonth()+1}月 週${WD[d.getDay()]}</small></div>
         <div class="m"><div class="t">${fmtH(m)} 小時 · ${r.bed}–${r.wake}</div><div class="s">${esc(bits.join('・') || '無特別狀況')}</div></div>
@@ -709,7 +752,10 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
     });
     exIds.forEach((label, id) => f.push([label, r => r.exercise === id]));
     if (settings.gender === 'male') f.splice(f.findIndex(x => x[0] === '經期中'), 1);
-    Object.entries(EXTRA).forEach(([k,label]) => f.push([label, r => (r.extra||[]).includes(k)]));
+    // 每個其他因素（包含已刪除但紀錄裡還有的）
+    const fxIds = new Map(settings.fxTypes.map(t => [t.id, t.label]));
+    Object.values(data).forEach(r => (r.extra||[]).forEach(id => { if (!fxIds.has(id)) fxIds.set(id, fxLabel(id, r)); }));
+    fxIds.forEach((label, id) => f.push([label, r => (r.extra||[]).includes(id)]));
     return f;
   }
 
@@ -869,6 +915,7 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
     $('#f-exother').value = r?.exOther || '';
     setRating(r?.rating || 0);
     setMulti('feel', r?.feel || []);
+    buildFactorChips(r);
     setMulti('extra', r?.extra || []);
     setCaf(r?.caffeine || 0);
     setSingle('exercise', r?.exercise || 'none');
@@ -912,6 +959,7 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
       exTime: state.exercise !== 'none' ? state.exTime : '',
       exOther: state.exercise === 'other' ? $('#f-exother').value.trim() : '',
       exName: !['none','other'].includes(state.exercise) ? exLabel({exercise:state.exercise, exName:data[editingDate]?.exName}) : '',
+      fxNames: Object.fromEntries((state.extra||[]).map(id => [id, fxLabel(id, data[editingDate])])),
       period: state.period,
       extra: state.extra,
       note: $('#f-note').value.trim(),
@@ -954,7 +1002,7 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
       (r.feel||[]).map(k=>FEEL[k]).join('/'), r.caffeine||0, r.cafTime||'',
       exLabel(r), EXT[r.exTime]||'',
       {yes:'經期中',no:'非經期',na:''}[r.period]||'',
-      (r.extra||[]).map(k=>EXTRA[k]).join('/'), r.note||''
+      (r.extra||[]).map(k=>fxLabel(k, r)).join('/'), r.note||''
     ].map(q).join(','));
     download(`sleep-${todayISO()}.csv`, '﻿' + [head.map(q).join(','), ...rows].join('\n'), 'text/csv');
   });
@@ -988,7 +1036,7 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
       const lateCaf = caffeine && Math.random() < .4;
       const exercise = pick(['none','none','other', ...settings.exTypes.map(t => t.id)]);
       const exTime = pick(['am','pm','night']);
-      const extra = Object.keys(EXTRA).filter(k => k!=='meds' && Math.random() < .25);
+      const extra = settings.fxTypes.map(t => t.id).filter(k => k!=='meds' && Math.random() < .25);
       const period = settings.gender === 'male' ? 'na' : ((i % 28) < 5 ? 'yes' : 'no');
       let score = 4 + (Math.random()-.5);
       if (lateCaf) score -= 1.5;
