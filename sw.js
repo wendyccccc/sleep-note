@@ -1,5 +1,5 @@
 // 離線快取：第一次開啟後，沒有網路也能使用
-const CACHE = 'sleepnote-v1';
+const CACHE = 'sleepnote-v5';
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
