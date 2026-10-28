@@ -156,7 +156,7 @@ nav.tabbar .inner{max-width:520px;margin:0 auto;display:grid;grid-template-colum
 .field:last-child{margin-bottom:0}
 .label{display:block;font-size:14px;font-weight:600;margin-bottom:8px}
 .label .hint{font-weight:400;color:var(--muted);font-size:12px;margin-left:6px}
-input[type=date],input[type=time],textarea{
+input[type=date],input[type=time],input[type=text],textarea{
   width:100%;min-height:52px;padding:12px 14px;border-radius:14px;
   border:1px solid var(--line);background:var(--bg);font-size:17px;
   appearance:none;-webkit-appearance:none;
@@ -196,6 +196,12 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
 .btn+.btn{margin-top:10px}
 .hidden{display:none!important}
 
+.warn{margin-top:12px;padding:12px 14px;border-radius:14px;font-size:13px;background:color-mix(in srgb,var(--bad) 14%,transparent);color:var(--bad)}
+.btn.danger-fill{background:var(--bad);color:#fff}
+.ask{position:fixed;inset:0;z-index:60;background:rgba(15,16,10,.5);display:flex;align-items:center;justify-content:center;padding:24px;opacity:0;pointer-events:none;transition:opacity .2s}
+.ask.show{opacity:1;pointer-events:auto}
+.ask-box{background:var(--card);border-radius:var(--radius);padding:22px 18px 18px;width:100%;max-width:340px}
+.ask-box p{margin:0 0 18px;font-size:16px;text-align:center}
 .toast{position:fixed;left:50%;bottom:calc(100px + var(--safe-b));transform:translate(-50%,20px);background:var(--text);color:var(--bg);padding:12px 20px;border-radius:999px;font-size:14px;opacity:0;transition:all .25s;z-index:50;pointer-events:none;white-space:nowrap}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 </style>
@@ -203,6 +209,8 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
 <body>
 
 <div class="wrap">
+
+  <div class="warn hidden" id="store-warn">目前的環境（例如預覽視窗或無痕模式）無法永久保存資料，關掉頁面紀錄就會消失。請用 Safari／Chrome 直接開啟，或加入主畫面使用。</div>
 
   <!-- 首頁 -->
   <section id="view-home" class="view active">
@@ -337,12 +345,17 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
       </div>
       <div class="field">
         <span class="label">運動</span>
-        <div class="seg" style="grid-template-columns:repeat(4,1fr)" data-single="exercise">
-          <button type="button" data-v="none" class="on">沒有</button>
-          <button type="button" data-v="light">輕度</button>
-          <button type="button" data-v="mid">中等</button>
-          <button type="button" data-v="hard">激烈</button>
+        <div class="seg" style="grid-template-columns:repeat(3,1fr)" data-single="exercise">
+          <button type="button" data-v="strongWeight">重訓（強）</button>
+          <button type="button" data-v="lightWeight">重訓（弱）</button>
+          <button type="button" data-v="cardio">有氧</button>
+          <button type="button" data-v="other">其他</button>
+          <button type="button" data-v="none" class="on" style="grid-column:span 2">沒有</button>
         </div>
+      </div>
+      <div class="field hidden" id="ex-other-field">
+        <label class="label" for="f-exother">其他運動</label>
+        <input type="text" id="f-exother" placeholder="例如：瑜珈、散步、游泳" maxlength="30">
       </div>
       <div class="field" id="ex-time-field">
         <span class="label">運動時段</span>
@@ -380,12 +393,20 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
       </div>
     </div>
 
-    <button type="submit" class="btn primary">儲存</button>
+    <button type="button" class="btn primary" id="btn-save">儲存</button>
     <button type="button" class="btn danger hidden" id="btn-delete">刪除這筆</button>
   </form>
 </div>
 
 <div class="toast" id="toast"></div>
+
+<div class="ask" id="ask" role="alertdialog" aria-modal="true" aria-labelledby="ask-msg">
+  <div class="ask-box">
+    <p id="ask-msg"></p>
+    <button type="button" class="btn primary" id="ask-ok">確定</button>
+    <button type="button" class="btn ghost" id="ask-cancel">取消</button>
+  </div>
+</div>
 
 <script>
 (() => {
@@ -395,7 +416,8 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
   const KEY = 'sleepnote.v1';
   const FEEL = {hardFall:'難以入睡',light:'淺眠',wake:'半夜醒來',early:'太早醒',dream:'多夢',groggy:'起床昏沉'};
   const EXTRA = {nap:'有午睡',alcohol:'喝酒',screen:'睡前滑手機',stress:'壓力大',lateMeal:'太晚吃東西',meds:'有吃助眠藥'};
-  const EX = {none:'沒運動',light:'輕度運動',mid:'中等運動',hard:'激烈運動'};
+  const EX = {strongWeight:'重訓（強）',lightWeight:'重訓（弱）',cardio:'有氧',other:'其他運動',none:'沒運動'};
+  const exLabel = r => r.exercise === 'other' && r.exOther ? r.exOther : (EX[r.exercise] || '');
   const EXT = {am:'上午',pm:'下午',night:'晚上'};
   const RATE_EMOJI = ['','😫','😕','😐','🙂','😴'];
   const WD = ['日','一','二','三','四','五','六'];
@@ -417,15 +439,43 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
   const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
   /* ---------- 儲存 ---------- */
+  // 測試 localStorage 能不能用（預覽視窗、部分無痕模式會被封鎖）
+  const canStore = (() => {
+    try { localStorage.setItem('__t','1'); localStorage.removeItem('__t'); return true; }
+    catch { return false; }
+  })();
   let data = load();
   function load(){
-    try { return JSON.parse(localStorage.getItem(KEY)) || {}; }
+    if (!canStore) return {};
+    let d;
+    try { d = JSON.parse(localStorage.getItem(KEY)) || {}; }
     catch { return {}; }
+    // 舊版運動選項（輕度／中等／激烈）轉成「其他」，保留原本文字
+    const OLD = {light:'輕度運動',mid:'中等運動',hard:'激烈運動'};
+    Object.values(d).forEach(r => { if (OLD[r.exercise]){ r.exOther = OLD[r.exercise]; r.exercise = 'other'; } });
+    return d;
   }
   function save(){
+    if (!canStore) return;   // 資料先留在記憶體，關掉頁面就會消失（頂端有提示）
     try { localStorage.setItem(KEY, JSON.stringify(data)); }
     catch { toast('儲存失敗，可能是瀏覽器空間不足'); }
   }
+
+  // 自訂確認框（取代 confirm()，沙盒環境裡 confirm 會被封鎖）
+  function ask(msg, okText = '確定', danger = false){
+    return new Promise(resolve => {
+      const box = $('#ask');
+      $('#ask-msg').textContent = msg;
+      const ok = $('#ask-ok');
+      ok.textContent = okText;
+      ok.className = 'btn ' + (danger ? 'danger-fill' : 'primary');
+      box.classList.add('show');
+      const done = v => { box.classList.remove('show'); ok.onclick = $('#ask-cancel').onclick = null; resolve(v); };
+      ok.onclick = () => done(true);
+      $('#ask-cancel').onclick = () => done(false);
+    });
+  }
+  if (!canStore) $('#store-warn').classList.remove('hidden');
   const sorted = () => Object.values(data).sort((a,b) => b.date.localeCompare(a.date));
 
   /* ---------- 導航 ---------- */
@@ -514,7 +564,7 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
       const bits = [];
       (r.feel||[]).forEach(k=>bits.push(FEEL[k]));
       if (r.caffeine) bits.push(`咖啡因 ${r.caffeine} 杯`);
-      if (r.exercise && r.exercise!=='none') bits.push(EX[r.exercise]);
+      if (r.exercise && r.exercise!=='none') bits.push(exLabel(r));
       if (r.period==='yes') bits.push('經期');
       (r.extra||[]).forEach(k=>bits.push(EXTRA[k]));
       return `<button class="entry" data-act="edit" data-date="${r.date}">
@@ -534,7 +584,9 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
       ['下午 2 點後喝咖啡因', r => r.caffeine > 0 && r.cafTime && toMin(r.cafTime) >= 14*60],
       ['有運動', r => r.exercise && r.exercise !== 'none'],
       ['晚上運動', r => r.exercise && r.exercise !== 'none' && r.exTime === 'night'],
-      ['激烈運動', r => r.exercise === 'hard'],
+      ['重訓（強）', r => r.exercise === 'strongWeight'],
+      ['重訓（強弱都算）', r => r.exercise === 'strongWeight' || r.exercise === 'lightWeight'],
+      ['有氧', r => r.exercise === 'cardio'],
       ['經期中', r => r.period === 'yes', r => r.period === 'yes' || r.period === 'no'],
       ['凌晨 0:30 後才上床', r => bedScore(r.bed) > 24*60+30],
     ];
@@ -641,7 +693,10 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
   function setSingle(group, v){
     $$(`[data-single="${group}"] button`).forEach(b => b.classList.toggle('on', b.dataset.v === v));
     state[group] = v;
-    if (group === 'exercise') $('#ex-time-field').classList.toggle('hidden', v === 'none');
+    if (group === 'exercise'){
+      $('#ex-time-field').classList.toggle('hidden', v === 'none');
+      $('#ex-other-field').classList.toggle('hidden', v !== 'other');
+    }
   }
   function setMulti(group, arr){
     state[group] = [...arr];
@@ -689,6 +744,7 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
     $('#f-wake').value = r?.wake || last?.wake || '07:30';
     $('#f-caftime').value = r?.cafTime || '10:00';
     $('#f-note').value = r?.note || '';
+    $('#f-exother').value = r?.exOther || '';
     setRating(r?.rating || 0);
     setMulti('feel', r?.feel || []);
     setMulti('extra', r?.extra || []);
@@ -713,12 +769,14 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
   $('#btn-close').addEventListener('click', closeSheet);
   $('#backdrop').addEventListener('click', closeSheet);
 
-  form.addEventListener('submit', e => {
-    e.preventDefault();
+  // 不用 form submit：在預覽視窗等沙盒環境中，表單送出會被瀏覽器擋下
+  form.addEventListener('submit', e => e.preventDefault());
+  $('#btn-save').addEventListener('click', async () => {
     if (!state.rating){ toast('請選擇整體睡得如何'); $('#f-rating').scrollIntoView({behavior:'smooth',block:'center'}); return; }
     const date = $('#f-date').value;
-    if (!date) return;
-    if (editingDate !== date && data[date] && !confirm(`${date} 已經有紀錄，要覆蓋嗎？`)) return;
+    if (!date){ toast('請選擇日期'); return; }
+    if (!$('#f-bed').value || !$('#f-wake').value){ toast('請填上床和起床時間'); return; }
+    if (editingDate !== date && data[date] && !(await ask(`${date} 已經有紀錄，要覆蓋嗎？`, '覆蓋'))) return;
     if (editingDate && editingDate !== date) delete data[editingDate];
     data[date] = {
       date,
@@ -730,6 +788,7 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
       cafTime: state.caffeine ? $('#f-caftime').value : '',
       exercise: state.exercise,
       exTime: state.exercise !== 'none' ? state.exTime : '',
+      exOther: state.exercise === 'other' ? $('#f-exother').value.trim() : '',
       period: state.period,
       extra: state.extra,
       note: $('#f-note').value.trim(),
@@ -738,8 +797,8 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
     save(); closeSheet(); render();
     toast('已儲存');
   });
-  $('#btn-delete').addEventListener('click', () => {
-    if (!editingDate || !confirm('確定刪除這筆紀錄？')) return;
+  $('#btn-delete').addEventListener('click', async () => {
+    if (!editingDate || !(await ask('確定刪除這筆紀錄？', '刪除', true))) return;
     delete data[editingDate]; save(); closeSheet(); render(); toast('已刪除');
   });
 
@@ -770,7 +829,7 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
     const rows = list.map(r => [
       r.date, r.bed, r.wake, fmtH(durMin(r.bed,r.wake)), r.rating,
       (r.feel||[]).map(k=>FEEL[k]).join('/'), r.caffeine||0, r.cafTime||'',
-      EX[r.exercise]||'', EXT[r.exTime]||'',
+      exLabel(r), EXT[r.exTime]||'',
       {yes:'經期中',no:'非經期',na:''}[r.period]||'',
       (r.extra||[]).map(k=>EXTRA[k]).join('/'), r.note||''
     ].map(q).join(','));
@@ -788,20 +847,20 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
     } catch { toast('檔案格式不正確'); }
     e.target.value = '';
   });
-  $('#btn-clear').addEventListener('click', () => {
-    if (!confirm('確定清除全部紀錄？此動作無法復原，建議先匯出備份。')) return;
+  $('#btn-clear').addEventListener('click', async () => {
+    if (!(await ask('確定清除全部紀錄？此動作無法復原，建議先匯出備份。', '清除', true))) return;
     data = {}; save(); render(); toast('已清除');
   });
 
   // 範例資料：刻意讓「下午喝咖啡」「睡前滑手機」「晚上運動」拉低評分，方便測試分析頁
-  $('#btn-demo').addEventListener('click', () => {
-    if (sorted().length && !confirm('會加入 30 天範例資料（同日期會被覆蓋），確定？')) return;
+  $('#btn-demo').addEventListener('click', async () => {
+    if (sorted().length && !(await ask('會加入 30 天範例資料（同日期會被覆蓋），確定？', '加入'))) return;
     const pick = a => a[Math.floor(Math.random()*a.length)];
     for (let i=1;i<=30;i++){
       const d = new Date(); d.setDate(d.getDate()-i);
       const caffeine = pick([0,0,1,1,1,2,2,3]);
       const lateCaf = caffeine && Math.random() < .4;
-      const exercise = pick(['none','none','light','mid','hard']);
+      const exercise = pick(['none','none','strongWeight','lightWeight','cardio','other']);
       const exTime = pick(['am','pm','night']);
       const extra = Object.keys(EXTRA).filter(k => k!=='meds' && Math.random() < .25);
       const period = (i % 28) < 5 ? 'yes' : 'no';
@@ -824,7 +883,8 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
         bed: scoreToTime(bedM), wake: scoreToTime(wakeM),
         rating, feel:[...new Set(feel)], caffeine,
         cafTime: caffeine ? (lateCaf ? pick(['14:30','15:00','16:30']) : pick(['08:30','10:00','11:30'])) : '',
-        exercise, exTime: exercise!=='none'?exTime:'', period, extra, note:'', updated:Date.now()
+        exercise, exTime: exercise!=='none'?exTime:'', exOther: exercise==='other'?pick(['瑜珈','散步','游泳']):'',
+        period, extra, note:'', updated:Date.now()
       };
     }
     save(); toast('已產生範例資料'); go('insight');
