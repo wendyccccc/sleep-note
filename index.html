@@ -196,6 +196,12 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
 .btn+.btn{margin-top:10px}
 .hidden{display:none!important}
 
+.ex-item{display:flex;align-items:center;gap:8px;min-height:52px;border-bottom:1px solid var(--line)}
+.ex-item span{flex:1;font-size:16px}
+.ex-item .icon-btn{color:var(--bad)}
+.add-row{display:flex;gap:8px;margin-top:12px}
+.add-row input{flex:1}
+.add-row .btn{width:auto;padding:0 20px;flex:none;min-height:52px}
 .warn{margin-top:12px;padding:12px 14px;border-radius:14px;font-size:13px;background:color-mix(in srgb,var(--bad) 14%,transparent);color:var(--bad)}
 .btn.danger-fill{background:var(--bad);color:#fff}
 .ask{position:fixed;inset:0;z-index:60;background:rgba(15,16,10,.5);display:flex;align-items:center;justify-content:center;padding:24px;opacity:0;pointer-events:none;transition:opacity .2s}
@@ -236,6 +242,39 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
   <!-- 設定 -->
   <section id="view-settings" class="view">
     <header><h1>設定</h1><p>資料只存在這支手機的瀏覽器裡</p></header>
+    <div class="card">
+      <h2>個人設定</h2>
+      <div class="field">
+        <span class="label">性別<span class="hint">選男性會隱藏經期欄位</span></span>
+        <div class="seg" style="grid-template-columns:repeat(3,1fr)" id="s-gender">
+          <button type="button" data-v="female">女性</button>
+          <button type="button" data-v="male">男性</button>
+          <button type="button" data-v="other">不透露</button>
+        </div>
+      </div>
+      <div class="field">
+        <span class="label">平常的作息<span class="hint">新增紀錄時預設帶入</span></span>
+        <div class="row">
+          <div>
+            <label class="label muted" for="s-bed" style="font-weight:400;font-size:13px">上床時間</label>
+            <input type="time" id="s-bed">
+          </div>
+          <div>
+            <label class="label muted" for="s-wake" style="font-weight:400;font-size:13px">起床時間</label>
+            <input type="time" id="s-wake">
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>運動類型</h2>
+      <div id="s-ex-list"></div>
+      <div class="add-row">
+        <input type="text" id="s-ex-new" placeholder="新增類型，例如：瑜珈" maxlength="12">
+        <button type="button" class="btn primary" id="s-ex-add">新增</button>
+      </div>
+      <p class="muted" style="font-size:12px;margin:10px 0 0">「其他」和「沒有」會固定顯示。刪除類型不會影響已存的紀錄。</p>
+    </div>
     <div class="card">
       <h2>資料備份</h2>
       <button class="btn ghost" id="btn-export">匯出 JSON 備份</button>
@@ -345,13 +384,7 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
       </div>
       <div class="field">
         <span class="label">運動</span>
-        <div class="seg" style="grid-template-columns:repeat(3,1fr)" data-single="exercise">
-          <button type="button" data-v="strongWeight">重訓（強）</button>
-          <button type="button" data-v="lightWeight">重訓（弱）</button>
-          <button type="button" data-v="cardio">有氧</button>
-          <button type="button" data-v="other">其他</button>
-          <button type="button" data-v="none" class="on" style="grid-column:span 2">沒有</button>
-        </div>
+        <div class="seg" style="grid-template-columns:repeat(3,1fr)" data-single="exercise" id="ex-seg"></div>
       </div>
       <div class="field hidden" id="ex-other-field">
         <label class="label" for="f-exother">其他運動</label>
@@ -365,7 +398,7 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
           <button type="button" data-v="night">晚上</button>
         </div>
       </div>
-      <div class="field">
+      <div class="field" id="period-field">
         <span class="label">經期</span>
         <div class="seg" style="grid-template-columns:repeat(3,1fr)" data-single="period">
           <button type="button" data-v="na" class="on">不適用</button>
@@ -416,8 +449,20 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
   const KEY = 'sleepnote.v1';
   const FEEL = {hardFall:'難以入睡',light:'淺眠',wake:'半夜醒來',early:'太早醒',dream:'多夢',groggy:'起床昏沉'};
   const EXTRA = {nap:'有午睡',alcohol:'喝酒',screen:'睡前滑手機',stress:'壓力大',lateMeal:'太晚吃東西',meds:'有吃助眠藥'};
-  const EX = {strongWeight:'重訓（強）',lightWeight:'重訓（弱）',cardio:'有氧',other:'其他運動',none:'沒運動'};
-  const exLabel = r => r.exercise === 'other' && r.exOther ? r.exOther : (EX[r.exercise] || '');
+  const SKEY = 'sleepnote.settings.v1';
+  const DEFAULT_EX = [
+    {id:'strongWeight', label:'重訓（強）'},
+    {id:'lightWeight',  label:'重訓（弱）'},
+    {id:'cardio',       label:'有氧'}
+  ];
+  const DEFAULT_SETTINGS = {gender:'other', bed:'23:30', wake:'07:30', exTypes:DEFAULT_EX};
+  // 運動名稱：先看目前設定，再看紀錄當時存下的名稱，最後才用內建名稱
+  const exLabel = r => {
+    if (!r.exercise || r.exercise === 'none') return '沒運動';
+    if (r.exercise === 'other') return r.exOther || '其他運動';
+    const t = settings.exTypes.find(t => t.id === r.exercise) || DEFAULT_EX.find(t => t.id === r.exercise);
+    return t ? t.label : (r.exName || '運動');
+  };
   const EXT = {am:'上午',pm:'下午',night:'晚上'};
   const RATE_EMOJI = ['','😫','😕','😐','🙂','😴'];
   const WD = ['日','一','二','三','四','五','六'];
@@ -476,6 +521,76 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
     });
   }
   if (!canStore) $('#store-warn').classList.remove('hidden');
+
+  /* ---------- 個人設定 ---------- */
+  let settings = loadSettings();
+  function loadSettings(){
+    let s = {};
+    if (canStore){ try { s = JSON.parse(localStorage.getItem(SKEY)) || {}; } catch {} }
+    s = {...DEFAULT_SETTINGS, ...s};
+    if (!Array.isArray(s.exTypes)) s.exTypes = DEFAULT_EX;
+    return s;
+  }
+  function saveSettings(){
+    if (!canStore) return;
+    try { localStorage.setItem(SKEY, JSON.stringify(settings)); } catch {}
+  }
+
+  function renderSettings(){
+    $$('#s-gender button').forEach(b => b.classList.toggle('on', b.dataset.v === settings.gender));
+    $('#s-bed').value = settings.bed;
+    $('#s-wake').value = settings.wake;
+    $('#s-ex-list').innerHTML = settings.exTypes.length
+      ? settings.exTypes.map(t => `<div class="ex-item"><span>${esc(t.label)}</span>
+          <button type="button" class="icon-btn" data-del-ex="${t.id}" aria-label="刪除 ${esc(t.label)}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 7h14M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>
+          </button></div>`).join('')
+      : '<p class="muted" style="margin:0">尚未設定，紀錄時只會有「其他」和「沒有」</p>';
+  }
+
+  $('#s-gender').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    settings.gender = b.dataset.v; saveSettings(); renderSettings(); toast('已更新');
+  });
+  ['bed','wake'].forEach(k => $('#s-'+k).addEventListener('change', e => {
+    if (!e.target.value) return;
+    settings[k] = e.target.value; saveSettings(); toast('已更新');
+  }));
+  $('#s-ex-add').addEventListener('click', () => {
+    const inp = $('#s-ex-new');
+    const label = inp.value.trim();
+    if (!label) return toast('請輸入運動名稱');
+    if (['其他','沒有'].includes(label) || settings.exTypes.some(t => t.label === label)) return toast('已經有這個類型了');
+    if (settings.exTypes.length >= 10) return toast('最多 10 種');
+    settings.exTypes = [...settings.exTypes, {id:'c' + Date.now().toString(36), label}];
+    inp.value = ''; saveSettings(); renderSettings(); toast('已新增');
+  });
+  $('#s-ex-new').addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); $('#s-ex-add').click(); } });
+  $('#s-ex-list').addEventListener('click', async e => {
+    const b = e.target.closest('[data-del-ex]'); if (!b) return;
+    const t = settings.exTypes.find(t => t.id === b.dataset.delEx);
+    if (!t || !(await ask(`刪除「${t.label}」？已存的紀錄會保留這個名稱。`, '刪除', true))) return;
+    // 把名稱寫進用到它的舊紀錄，刪掉之後列表上仍顯示得出來
+    Object.values(data).forEach(r => { if (r.exercise === t.id) r.exName = t.label; });
+    save();
+    settings.exTypes = settings.exTypes.filter(x => x.id !== t.id);
+    saveSettings(); renderSettings(); toast('已刪除');
+  });
+
+  // 紀錄表單裡的運動按鈕依設定產生
+  function buildExerciseButtons(current){
+    const items = [...settings.exTypes];
+    // 修改舊紀錄時，若該類型已被刪除，暫時補回按鈕讓它能被選取
+    if (current && !['none','other'].includes(current) && !items.some(t => t.id === current)){
+      items.push({id:current, label: exLabel({exercise:current, exName: data[editingDate]?.exName})});
+    }
+    const n = items.length + 1;              // 類型 + 「其他」
+    const span = 3 - (n % 3);                // 讓「沒有」補滿最後一排
+    $('#ex-seg').innerHTML =
+      items.map(t => `<button type="button" data-v="${t.id}">${esc(t.label)}</button>`).join('') +
+      `<button type="button" data-v="other">其他</button>` +
+      `<button type="button" data-v="none" style="grid-column:span ${span}">沒有</button>`;
+  }
   const sorted = () => Object.values(data).sort((a,b) => b.date.localeCompare(a.date));
 
   /* ---------- 導航 ---------- */
@@ -584,12 +699,16 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
       ['下午 2 點後喝咖啡因', r => r.caffeine > 0 && r.cafTime && toMin(r.cafTime) >= 14*60],
       ['有運動', r => r.exercise && r.exercise !== 'none'],
       ['晚上運動', r => r.exercise && r.exercise !== 'none' && r.exTime === 'night'],
-      ['重訓（強）', r => r.exercise === 'strongWeight'],
-      ['重訓（強弱都算）', r => r.exercise === 'strongWeight' || r.exercise === 'lightWeight'],
-      ['有氧', r => r.exercise === 'cardio'],
       ['經期中', r => r.period === 'yes', r => r.period === 'yes' || r.period === 'no'],
       ['凌晨 0:30 後才上床', r => bedScore(r.bed) > 24*60+30],
     ];
+    // 每種運動類型各自比較（包含已刪除但紀錄裡還有的類型）
+    const exIds = new Map(settings.exTypes.map(t => [t.id, t.label]));
+    Object.values(data).forEach(r => {
+      if (r.exercise && !['none','other'].includes(r.exercise) && !exIds.has(r.exercise)) exIds.set(r.exercise, exLabel(r));
+    });
+    exIds.forEach((label, id) => f.push([label, r => r.exercise === id]));
+    if (settings.gender === 'male') f.splice(f.findIndex(x => x[0] === '經期中'), 1);
     Object.entries(EXTRA).forEach(([k,label]) => f.push([label, r => (r.extra||[]).includes(k)]));
     return f;
   }
@@ -683,6 +802,7 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
     if (view === 'home') renderHome();
     else if (view === 'history') renderHistory();
     else if (view === 'insight') renderInsight();
+    else if (view === 'settings') renderSettings();
   }
 
   /* ---------- 表單 ---------- */
@@ -740,8 +860,10 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
     $('#sheet-title').textContent = r ? '修改紀錄' : '記錄昨晚';
     $('#f-date').value = r ? r.date : todayISO();
     $('#f-date').max = todayISO();
-    $('#f-bed').value = r?.bed || last?.bed || '23:30';
-    $('#f-wake').value = r?.wake || last?.wake || '07:30';
+    $('#f-bed').value = r?.bed || settings.bed;
+    $('#f-wake').value = r?.wake || settings.wake;
+    buildExerciseButtons(r?.exercise);
+    $('#period-field').classList.toggle('hidden', settings.gender === 'male');
     $('#f-caftime').value = r?.cafTime || '10:00';
     $('#f-note').value = r?.note || '';
     $('#f-exother').value = r?.exOther || '';
@@ -752,7 +874,7 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
     setSingle('exercise', r?.exercise || 'none');
     setSingle('exTime', r?.exTime || 'am');
     // 經期沿用上一筆（經期通常連續數天）
-    setSingle('period', r?.period || last?.period || 'na');
+    setSingle('period', settings.gender === 'male' ? 'na' : (r?.period || last?.period || (settings.gender === 'female' ? 'no' : 'na')));
     $('#btn-delete').classList.toggle('hidden', !r);
     updateDuration();
     $('#sheet').scrollTop = 0;
@@ -789,6 +911,7 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
       exercise: state.exercise,
       exTime: state.exercise !== 'none' ? state.exTime : '',
       exOther: state.exercise === 'other' ? $('#f-exother').value.trim() : '',
+      exName: !['none','other'].includes(state.exercise) ? exLabel({exercise:state.exercise, exName:data[editingDate]?.exName}) : '',
       period: state.period,
       extra: state.extra,
       note: $('#f-note').value.trim(),
@@ -819,7 +942,7 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
   }
   $('#btn-export').addEventListener('click', () => {
     if (!sorted().length) return toast('沒有資料可以匯出');
-    download(`sleep-backup-${todayISO()}.json`, JSON.stringify(data, null, 2), 'application/json');
+    download(`sleep-backup-${todayISO()}.json`, JSON.stringify({version:2, settings, records:data}, null, 2), 'application/json');
   });
   $('#btn-csv').addEventListener('click', () => {
     const list = sorted().reverse();
@@ -840,9 +963,12 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
     const file = e.target.files[0]; if (!file) return;
     try {
       const obj = JSON.parse(await file.text());
-      const valid = Object.values(obj).filter(r => r && r.date && r.bed && r.wake);
+      // 新版備份為 {settings, records}；舊版備份直接是紀錄
+      const records = obj.records || obj;
+      const valid = Object.values(records).filter(r => r && r.date && r.bed && r.wake);
       if (!valid.length) throw 0;
       valid.forEach(r => data[r.date] = r);
+      if (obj.settings){ settings = {...DEFAULT_SETTINGS, ...obj.settings}; saveSettings(); }
       save(); render(); toast(`已匯入 ${valid.length} 筆`);
     } catch { toast('檔案格式不正確'); }
     e.target.value = '';
@@ -860,10 +986,10 @@ textarea{min-height:84px;resize:vertical;font-size:16px}
       const d = new Date(); d.setDate(d.getDate()-i);
       const caffeine = pick([0,0,1,1,1,2,2,3]);
       const lateCaf = caffeine && Math.random() < .4;
-      const exercise = pick(['none','none','strongWeight','lightWeight','cardio','other']);
+      const exercise = pick(['none','none','other', ...settings.exTypes.map(t => t.id)]);
       const exTime = pick(['am','pm','night']);
       const extra = Object.keys(EXTRA).filter(k => k!=='meds' && Math.random() < .25);
-      const period = (i % 28) < 5 ? 'yes' : 'no';
+      const period = settings.gender === 'male' ? 'na' : ((i % 28) < 5 ? 'yes' : 'no');
       let score = 4 + (Math.random()-.5);
       if (lateCaf) score -= 1.5;
       if (extra.includes('screen')) score -= 1;
