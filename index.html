@@ -308,6 +308,8 @@ body{padding-bottom:calc(76px + var(--safe-b))}
 .ask-box{border-radius:16px}
 .ask-box p{font-size:15px}
 .toast{font-size:13px;padding:9px 16px;bottom:calc(86px + var(--safe-b))}
+.card.remind{background:var(--primary-soft);border-color:var(--primary)}
+.card.remind h2{color:var(--primary)}
 .bars{height:120px}
 .bar i{max-width:12px;border-radius:6px 6px 3px 3px}
 .legend{font-size:11px}
@@ -366,6 +368,27 @@ body{padding-bottom:calc(76px + var(--safe-b))}
             <input type="time" id="s-wake">
           </div>
         </div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>每日提醒</h2>
+      <div class="field">
+        <label class="label" for="s-remind">提醒時間</label>
+        <input type="time" id="s-remind">
+      </div>
+      <div class="field">
+        <span class="label">加到手機行事曆<span class="hint">每天這個時間跳通知，App 關著也會提醒</span></span>
+        <button type="button" class="btn primary" id="btn-ics">加入 iPhone／手機行事曆</button>
+        <button type="button" class="btn ghost" id="btn-gcal">加入 Google 日曆</button>
+        <p class="muted" style="font-size:12px;margin:8px 0 0">點通知裡的連結就能直接打開 App 記錄。改了時間要重新加入一次，並刪掉行事曆裡的舊提醒。</p>
+      </div>
+      <div class="field">
+        <span class="label">App 內提醒</span>
+        <div class="seg" style="grid-template-columns:1fr 1fr" id="s-banner">
+          <button type="button" data-v="on">開啟</button>
+          <button type="button" data-v="off">關閉</button>
+        </div>
+        <p class="muted" style="font-size:12px;margin:8px 0 0">過了提醒時間、當天還沒記錄時，首頁頂端會顯示提醒。</p>
       </div>
     </div>
     <div class="card">
@@ -586,7 +609,8 @@ body{padding-bottom:calc(76px + var(--safe-b))}
     {id:'energy',  label:'能量飲'}
   ];
   const CAF_TIME = {am:'早上', pm:'下午', night:'晚上'};
-  const DEFAULT_SETTINGS = {gender:'other', bed:'23:30', wake:'07:30', exTypes:DEFAULT_EX, fxTypes:DEFAULT_FX, cafTypes:DEFAULT_CAF};
+  const DEFAULT_SETTINGS = {gender:'other', bed:'23:30', wake:'07:30', exTypes:DEFAULT_EX, fxTypes:DEFAULT_FX, cafTypes:DEFAULT_CAF,
+                            remindTime:'08:30', remindBanner:true};
   // 舊版只有「杯數＋最後時間」→ 轉成一筆「咖啡因」
   const toCafItems = r => {
     if (Array.isArray(r.cafItems)) return r.cafItems;
@@ -690,6 +714,8 @@ body{padding-bottom:calc(76px + var(--safe-b))}
     $$('#s-gender button').forEach(b => b.classList.toggle('on', b.dataset.v === settings.gender));
     $('#s-bed').value = settings.bed;
     $('#s-wake').value = settings.wake;
+    $('#s-remind').value = settings.remindTime;
+    $$('#s-banner button').forEach(b => b.classList.toggle('on', (b.dataset.v === 'on') === settings.remindBanner));
     LISTS.forEach(renderList);
   }
 
@@ -746,6 +772,61 @@ body{padding-bottom:calc(76px + var(--safe-b))}
     const b = e.target.closest('button'); if (!b) return;
     settings.gender = b.dataset.v; saveSettings(); renderSettings(); toast('已更新');
   });
+  /* ---------- 每日提醒 ---------- */
+  $('#s-remind').addEventListener('change', e => {
+    if (!e.target.value) return;
+    settings.remindTime = e.target.value; saveSettings(); toast('已更新，記得重新加入行事曆');
+  });
+  $('#s-banner').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    settings.remindBanner = b.dataset.v === 'on'; saveSettings(); renderSettings(); toast('已更新');
+  });
+  // App 網址（去掉 # 和查詢字串），行事曆通知裡點了就能打開
+  const appURL = () => location.origin + location.pathname;
+  // 提醒從「下一次的提醒時間」開始，每天重複
+  function nextRemindStart(){
+    const [h, m] = settings.remindTime.split(':').map(Number);
+    const d = new Date(); d.setHours(h, m, 0, 0);
+    if (d <= new Date()) d.setDate(d.getDate() + 1);
+    return d;
+  }
+  const icsStamp = d => `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}T${pad(d.getHours())}${pad(d.getMinutes())}00`;
+  $('#btn-ics').addEventListener('click', () => {
+    const s = nextRemindStart(), e = new Date(s.getTime() + 5*60000);
+    const now = new Date();
+    const utc = `${now.getUTCFullYear()}${pad(now.getUTCMonth()+1)}${pad(now.getUTCDate())}T${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}00Z`;
+    // 不帶時區 = 依手機當地時間，出國也會在當地的同一時間提醒
+    const ics = [
+      'BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//SleepNote//ZH','CALSCALE:GREGORIAN','METHOD:PUBLISH',
+      'BEGIN:VEVENT',
+      `UID:sleepnote-reminder-${Date.now()}@sleepnote`,
+      `DTSTAMP:${utc}`,
+      `DTSTART:${icsStamp(s)}`,
+      `DTEND:${icsStamp(e)}`,
+      'RRULE:FREQ=DAILY',
+      'SUMMARY:🌙 記錄昨晚的睡眠',
+      `DESCRIPTION:花 30 秒記下昨晚睡得怎麼樣\\n${appURL()}`,
+      `URL:${appURL()}`,
+      'TRANSP:TRANSPARENT',
+      'BEGIN:VALARM','ACTION:DISPLAY','DESCRIPTION:記錄昨晚的睡眠','TRIGGER:PT0M','END:VALARM',
+      'END:VEVENT','END:VCALENDAR'
+    ].join('\r\n');
+    download('sleep-reminder.ics', ics, 'text/calendar');
+    toast('打開下載的檔案，加入行事曆');
+  });
+  $('#btn-gcal').addEventListener('click', () => {
+    const s = nextRemindStart(), e = new Date(s.getTime() + 5*60000);
+    const p = new URLSearchParams({
+      action:'TEMPLATE',
+      text:'🌙 記錄昨晚的睡眠',
+      details:`花 30 秒記下昨晚睡得怎麼樣\n${appURL()}`,
+      dates:`${icsStamp(s)}/${icsStamp(e)}`,
+      ctz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Taipei',
+      recur:'RRULE:FREQ=DAILY'
+    });
+    window.open('https://calendar.google.com/calendar/render?' + p.toString(), '_blank');
+  });
+
   ['bed','wake'].forEach(k => $('#s-'+k).addEventListener('change', e => {
     if (!e.target.value) return;
     settings[k] = e.target.value; saveSettings(); toast('已更新');
@@ -798,7 +879,16 @@ body{padding-bottom:calc(76px + var(--safe-b))}
     const today = data[todayISO()];
 
     let html = '';
-    if (!today){
+    // 過了提醒時間還沒記錄 → 醒目的提醒卡
+    const nowMin = new Date().getHours()*60 + new Date().getMinutes();
+    const due = !today && settings.remindBanner && nowMin >= toMin(settings.remindTime);
+    if (due){
+      html += `<div class="card remind">
+        <h2>⏰ 提醒時間到了（${settings.remindTime}）</h2>
+        <p style="margin:0 0 14px">今天還沒記錄，趁還記得，花 30 秒記下昨晚睡得怎麼樣。</p>
+        <button class="btn primary" data-act="new">記錄昨晚</button>
+      </div>`;
+    } else if (!today){
       html += `<div class="card">
         <h2>今天還沒記錄</h2>
         <p style="margin:0 0 14px">花 30 秒，記下昨晚睡得怎麼樣。</p>
